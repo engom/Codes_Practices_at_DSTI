@@ -1,0 +1,291 @@
+---
+title: "The Eggs Roulette"
+---
+
+# Initializing the workspace
+
+```{r}
+## some utilities for functional programming and plotting
+library(tidyverse)
+
+## our initial basket
+EGGS <- c(rep(0, 8), rep(1, 4))
+
+## total number of replicates
+NUM_REPLICATES <- 50000
+
+## for reproducibility
+RNG_SEED <- 1234
+```
+
+# Generating the Sample Space
+
+We'll encode a game as a vector of eggs, with order matching the extraction
+order. Odd-positioned eggs are smashed by the guest, even-positioned eggs
+are smashed by the host.
+
+Some utility functions:
+```{r}
+num_raw_eggs_guest <- function(game) {
+  if(length(game) == 0) {
+    return(0)
+  } else {
+    return(sum(game[seq(1, length(game), by = 2)]))
+  }
+}
+
+num_raw_eggs_host <- function(game) {
+  if(length(game) < 2) {
+    return(0)
+  } else {
+    return(sum(game[seq(2, length(game), by = 2)]))
+  }
+}
+
+game_over <- function(game) {
+  max(num_raw_eggs_guest(game), num_raw_eggs_host(game)) == 2
+}
+
+rgame <- function() {
+  eggs <- EGGS
+  game <- vector('numeric', length = 0)
+  while(!game_over(game)) {
+    i <- sample.int(length(eggs), size = 1)
+    game <- append(game, eggs[i])
+    eggs <- eggs[-i]
+  }
+  game
+}
+```
+
+Lets test it:
+```{r}
+rgame()
+```
+
+It works! Now lets generate a few games:
+
+```{r}
+set.seed(RNG_SEED)
+games <- replicate(NUM_REPLICATES, rgame(), simplify = FALSE)
+```
+
+```{r}
+length(games)
+```
+
+```{r}
+str(games[1:10])
+```
+
+# Convergence
+
+What's the probability of extracting a raw egg at the first try?
+
+By simple arithmetic:
+```{r}
+4/12
+```
+
+Using our simulated data:
+```{r}
+unlucky_first <- map_dbl(games, 1)
+mean(unlucky_first)
+```
+
+The Law of Large Numbers (LNN) in action:
+```{r}
+p_n <- cumsum(unlucky_first) / seq_len(NUM_REPLICATES)
+plot(p_n, type = "l")
+abline(h = 1/3, lty = 2, col = 'blue')
+```
+
+```{r}
+plot(p_n, type = "l", xlim = c(0, 10000))
+abline(h = 1/3, lty = 2, col = 'blue')
+```
+
+# Multiple Random Variables
+
+```{r}
+X <- map_dbl(games, num_raw_eggs_guest)
+Y <- map_dbl(games, num_raw_eggs_host)
+Z <- map_dbl(games, length)
+```
+
+## Marginal probabilities
+
+We can see for each player probabilities of:
+- loosing
+- staying clean (0 raw eggs)
+```{r}
+prop.table(table(X))
+prop.table(table(Y))
+```
+
+How long can a game take?
+```{r}
+prop.table(table(Z))
+```
+
+There's about a 9% chance for the guest to smash 2 raw eggs in a row.
+
+## Joint probabilities
+
+What's the probability of 2 raw eggs for guest, with host staying clean?
+```{r}
+prop.table(table(X, Y))
+```
+
+What about the specific event from the show? Two raw eggs in a row for guest,
+with host staying clean:
+```{r}
+prop.table(table(Y, Z))
+```
+
+That is the event (Y=0, Z=3), for which we estimate a probability of about 7.3%.
+
+Note: 3-way tables in R
+```{r}
+prop.table(table(X, Y, Z))
+```
+
+# Conditional probability
+
+Conditional on the first 2 extractions as seen in the show (raw, boiled), what's
+the probability of a new raw egg for the guest?
+By simple arithmetic:
+```{r}
+3/10
+```
+
+Using our simulated data and applying the definition of conditional probability:
+```{r}
+E_conditioning <- map_dbl(games, function(game) (game[1] == 1) & (game[2] == 0))
+E_conditioned <- map_dbl(games, function(game) game[3] == 1)
+mean(E_conditioning & E_conditioned) / mean(E_conditioning)
+```
+
+Using our simulated data, plus intuition:
+```{r}
+games_raw_boiled <- Filter(function(game) {
+  game[1] == 1 & game[2] == 0
+  },
+  games)
+length(games_raw_boiled)
+```
+
+```{r}
+mean(map_dbl(games_raw_boiled, function(game) game[3] == 1))
+```
+
+# Geometric Distribution
+
+How many shows we'll have to watch before seeing 2 raw eggs in a raw, with
+a clean host?
+
+```{r}
+I_event <- function(game) identical(game, c(1, 0, 1))
+ii <- map_dbl(games, I_event)
+```
+
+```{r}
+prop.table(table(ii))
+```
+
+When did the events of interest occur?
+```{r}
+wt <- which(ii == 1)
+head(wt)
+```
+
+Thus the waiting times:
+```{r}
+Y <- c(wt[1], diff(wt))
+py <- prop.table(table(Y))
+
+head(as.data.frame(py))
+tail(as.data.frame(py))
+
+plot(py)
+```
+
+How does our empirically determined distribution match the theoretical geometric distribution?
+
+```{r}
+ty <- as.tibble(py)
+ty$Y <- as.numeric(as.character(ty$Y))
+ty$Prob <- dgeom(x = ty$Y, prob = 8/110)
+ty <- rename(ty, empirical = n, theoretical = Prob)
+head(ty)
+tail(ty)
+```
+
+Lets plot them side by side:
+```{r}
+d <- gather(ty, key = "method", value = "probability", empirical, theoretical) %>%
+  filter(Y <= 50)
+ggplot(d, aes(Y, probability, fill = method)) +
+  geom_bar(stat = 'identity', position = position_dodge()) +
+  theme_bw()
+```
+
+Not bad at all!
+
+## Expected Value
+
+Now, what are its expected value and variance?
+
+By Monte Carlo approximation:
+```{r}
+c(mean = mean(Y), var = var(Y))
+```
+
+## CLT approximation
+
+Out of 200 (independent) game shows, what's the probability of observing
+more than 10 short games (3 trials, clean host)?
+
+By Monte Carlo approximation:
+```{r}
+n <- 200
+p <- 8/110
+set.seed(RNG_SEED)
+Y <- rbinom(n = NUM_REPLICATES, size = n, prob = p)
+mean(Y > 10)
+```
+
+Using the asymptotic Normal approximation:
+```{r}
+hist(Y, prob = TRUE, col = 'gray', breaks = 30)
+curve(dnorm(x, mean = n * p, sd = sqrt(n * p * (1 - p))), add = TRUE, col = 'blue')
+```
+
+```{r}
+pnorm(10, mean = n * p, sd = sqrt(n * p * (1 - p)), lower.tail = FALSE)
+```
+
+And finally, the exact value:
+```{r}
+pbinom(10, size = n, prob = p, lower.tail = FALSE)
+```
+
+What if we considered 2000 trials rather than 200?
+```{r}
+n <- 2000
+p <- 8/110
+set.seed(RNG_SEED)
+Y <- rbinom(NUM_REPLICATES, size = n, prob = p)
+```
+
+```{r}
+hist(Y, prob = TRUE, col = 'gray', breaks = 30)
+curve(dnorm(x, mean = n * p, sd = sqrt(n * p * (1 - p))), add = TRUE, col = 'blue')
+```
+
+```{r}
+curve(pbinom(x, size = n, prob = p), from = -2, to = 200)
+curve(pnorm(x, mean = n * p, sd = sqrt(n * p * (1 - p))), lty = 2, add = TRUE, col = 'blue')
+```
+
+The CDFs are pretty much identical.
