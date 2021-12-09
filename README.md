@@ -2,7 +2,7 @@
 
 You can find here some codes I have written in DSTI experience. The main types of codes are :
 
-- __Python__ (with _Jyputer Notebook_ as code editor)
+- __Python__ (with _Jupyter Notebook_ as code editor)
 - __R__
 - __SQL__
 
