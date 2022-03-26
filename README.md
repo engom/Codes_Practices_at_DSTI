@@ -6,7 +6,7 @@ You can find here some codes I have written in my DSTI training experience. Type
 - __R__
 - __SQL__
 - __Dockerfile__
-- 
+
 It is all about data science and applied maths. 
 
 Thank you reading me.
